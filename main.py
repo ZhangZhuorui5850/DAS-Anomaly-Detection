@@ -19,6 +19,10 @@ from src.data.preprocessing import DASDataLoader, DASPreprocessor, split_dataset
 from src.features.feature_extraction import FeatureExtractor, SequenceGenerator
 from src.models.classical.classical_models import create_classical_model
 from src.models.deep_learning.lstm_cnn import create_model
+from src.utils.logger import Logger, TrainingLogger
+from src.training.train_classical import ClassicalModelTrainer
+from src.training.train_deep import DeepModelTrainer
+from src.evaluation.metrics import ModelEvaluator
 
 
 class DASAnomalyDetectionPipeline:
@@ -27,12 +31,16 @@ class DASAnomalyDetectionPipeline:
     def __init__(self, config):
         self.config = config
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.logger = Logger(config.LOGS_DIR, name="DAS_Pipeline")
+
+        # [新增] 用于存储所有模型评估结果的字典
+        self.all_model_metrics = {}
 
     def run_preprocessing(self):
         """数据预处理流程"""
-        print("\n" + "=" * 80)
-        print("步骤 1: 数据预处理")
-        print("=" * 80)
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info("步骤 1: 数据预处理")
+        self.logger.info("=" * 80)
 
         # 加载数据
         loader = DASDataLoader(self.config.RAW_DATA_DIR / self.config.DATA_FILE)
@@ -58,7 +66,7 @@ class DASAnomalyDetectionPipeline:
             'X_val': X_val, 'y_val': y_val,
             'X_test': X_test, 'y_test': y_test
         }, output_path)
-        print(f"\n✓ 预处理完成! 数据已保存: {output_path}")
+        self.logger.info(f"\n✓ 预处理完成! 数据已保存: {output_path}")
 
         # 保存归一化器
         preprocessor.save_scaler(self.config.PROCESSED_DATA_DIR / "scaler.pkl")
@@ -117,295 +125,156 @@ class DASAnomalyDetectionPipeline:
         print("\n✓ 特征提取完成!")
 
     def train_classical_models(self, models=['xgboost']):
-        """训练经典机器学习模型"""
-        print("\n" + "=" * 80)
-        print("步骤 3: 训练经典机器学习模型")
-        print("=" * 80)
+        """训练经典机器学习模型 (已重构)"""
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info("步骤 3: 训练经典机器学习模型")
+        self.logger.info("=" * 80)
 
-        # 加载特征
-        features_train = pd.read_pickle(self.config.FEATURES_DIR / "features_train.pkl")
-        features_val = pd.read_pickle(self.config.FEATURES_DIR / "features_val.pkl")
-
-        X_train = features_train['features'].values
-        y_train = features_train['labels'].values
-        X_val = features_val['features'].values
-        y_val = features_val['labels'].values
-
-        results = {}
+        # results = {} # [修改] 不再使用局部变量 results
 
         for model_name in models:
-            print(f"\n训练 {model_name.upper()} 模型...")
+            self.logger.info(f"\n--- 开始训练 {model_name.upper()} ---")
 
-            # 创建并训练模型
-            model = create_classical_model(model_name, self.config)
-            model.train(X_train, y_train, X_val, y_val)
+            try:
+                # 1. 创建专用的训练器实例
+                # 注意: ClassicalModelTrainer 会创建自己的专用 logger
+                trainer = ClassicalModelTrainer(
+                    model_type=model_name,
+                    config=self.config,
+                    timestamp=self.timestamp  # 传递总时间戳
+                )
 
-            # 保存模型
-            model_path = self.config.CHECKPOINTS_DIR / f"{model_name}_{self.timestamp}.pkl"
-            model.save(model_path)
+                # 2. 运行完整的训练和评估流程
+                # .run() 方法会自动处理: 加载数据、训练、(可选CV)、测试集评估
+                # 它会返回测试集上的 metrics
+                metrics = trainer.run(with_cv=False)
 
-            # 评估
-            from sklearn.metrics import accuracy_score, f1_score, classification_report
+                #results[model_name] = metrics
+                # [修改] 将结果存储到类的属性中
+                if metrics:
+                    self.all_model_metrics[model_name] = metrics
 
-            y_pred = model.predict(X_val)
-            acc = accuracy_score(y_val, y_pred)
-            f1 = f1_score(y_val, y_pred)
+                self.logger.info(f"--- {model_name.upper()} 训练完成 ---")
 
-            results[model_name] = {'accuracy': acc, 'f1_score': f1}
+            except Exception as e:
+                self.logger.error(f"训练 {model_name} 失败: {e}")
 
-            print(f"\n{model_name.upper()} 验证集性能:")
-            print(f"准确率: {acc:.4f}")
-            print(f"F1分数: {f1:.4f}")
-            print(classification_report(y_val, y_pred, target_names=['Normal', 'Anomaly']))
+        # ClassicalModelTrainer 已经自己保存了详细结果，
+        # 这里 pipeline 只是收集一个总览。
 
-        # 保存结果
-        results_df = pd.DataFrame(results).T
-        results_path = self.config.RESULTS_DIR / f"classical_results_{self.timestamp}.csv"
-        results_df.to_csv(results_path)
-        print(f"\n✓ 结果已保存: {results_path}")
-
-        return results
+        # (可选) 你可以把汇总结果也保存一下
+        # if results:
+        #     results_df = pd.DataFrame(results).T
+        #     results_path = self.config.RESULTS_DIR / f"classical_summary_{self.timestamp}.csv"
+        #     results_df.to_csv(results_path)
+        #     self.logger.info(f"\n✓ 经典模型训练汇总已保存: {results_path}")
+        #
+        # return results
 
     def train_deep_models(self, models=['lstm_cnn']):
-        """训练深度学习模型"""
-        print("\n" + "=" * 80)
-        print("步骤 4: 训练深度学习模型")
-        print("=" * 80)
-
-        # (修复) 导入 DataLoader
-        from torch.utils.data import TensorDataset, DataLoader
-
-        # 加载序列数据
-        seq_train = pd.read_pickle(self.config.FEATURES_DIR / "sequences_train.pkl")
-        seq_val = pd.read_pickle(self.config.FEATURES_DIR / "sequences_val.pkl")
-
-        X_train_tensor = torch.FloatTensor(seq_train['X_seq'])
-        y_train_tensor = torch.LongTensor(seq_train['y_seq'])
-        X_val_tensor = torch.FloatTensor(seq_val['X_seq'])
-        y_val_tensor = torch.LongTensor(seq_val['y_seq'])
-
-        print(f"训练集: {X_train_tensor.shape}")
-        print(f"验证集: {X_val_tensor.shape}")
-
-        # (修复) 创建 TensorDataset 和 DataLoader
-        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-        val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
-
-        train_loader = DataLoader(
-            dataset=train_dataset,
-            batch_size=self.config.BATCH_SIZE,
-            shuffle=True
-        )
-        val_loader = DataLoader(
-            dataset=val_dataset,
-            batch_size=self.config.BATCH_SIZE,
-            shuffle=False
-        )
+        """训练深度学习模型 (已重构)"""
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info("步骤 4: 训练深度学习模型")
+        self.logger.info("=" * 80)
 
         results = {}
 
         for model_name in models:
-            print(f"\n训练 {model_name.upper()} 模型...")
+            self.logger.info(f"\n--- 开始训练 {model_name.upper()} ---")
 
-            model = create_model(model_name, self.config)
-            criterion = torch.nn.CrossEntropyLoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.config.LEARNING_RATE)
-
-            best_val_loss = float('inf')
-            patience_counter = 0
-
-            # (修复) 使用 config 中的 NUM_EPOCHS, 而不是硬编码 10
-            for epoch in range(self.config.NUM_EPOCHS):
-                model.train()
-                train_loss_total = 0
-
-                # (修复) 真正的批次训练
-                for X_batch, y_batch in train_loader:
-                    X_batch, y_batch = X_batch.to(self.config.DEVICE), y_batch.to(self.config.DEVICE)
-
-                    optimizer.zero_grad()
-                    outputs = model(X_batch)
-                    loss = criterion(outputs, y_batch)
-                    loss.backward()
-                    optimizer.step()
-
-                    train_loss_total += loss.item()
-
-                # 验证
-                model.eval()
-                val_loss_total = 0
-                correct = 0
-                total = 0
-                with torch.no_grad():
-                    for X_val_batch, y_val_batch in val_loader:
-                        X_val_batch, y_val_batch = X_val_batch.to(self.config.DEVICE), y_val_batch.to(
-                            self.config.DEVICE)
-
-                        val_outputs = model(X_val_batch)
-                        val_loss = criterion(val_outputs, y_val_batch)
-                        val_loss_total += val_loss.item()
-
-                        _, predicted = torch.max(val_outputs, 1)
-                        total += y_val_batch.size(0)
-                        correct += (predicted == y_val_batch).sum().item()
-
-                avg_train_loss = train_loss_total / len(train_loader)
-                avg_val_loss = val_loss_total / len(val_loader)
-                val_acc = correct / total
-
-                print(f"Epoch [{epoch + 1}/{self.config.NUM_EPOCHS}] "
-                      f"Train Loss: {avg_train_loss:.4f} "
-                      f"Val Loss: {avg_val_loss:.4f} "
-                      f"Val Acc: {val_acc:.4f}")
-
-                # (修复) 使用 config 中的早停
-                if avg_val_loss < best_val_loss - self.config.EARLY_STOPPING_DELTA:
-                    best_val_loss = avg_val_loss
-                    patience_counter = 0
-                    torch.save(model.state_dict(),
-                               self.config.CHECKPOINTS_DIR / f"{model_name}_best_{self.timestamp}.pth")
-                else:
-                    patience_counter += 1
-                    if patience_counter >= self.config.EARLY_STOPPING_PATIENCE:
-                        print(f"早停触发 (Patience={self.config.EARLY_STOPPING_PATIENCE})")
-                        break
-
-            # (修复) 确保加载回最佳模型进行结果记录
-            # 加载最佳模型
-            if Path(self.config.CHECKPOINTS_DIR / f"{model_name}_best_{self.timestamp}.pth").exists():
-                model.load_state_dict(
-                    torch.load(self.config.CHECKPOINTS_DIR / f"{model_name}_best_{self.timestamp}.pth"))
-
-            model.eval()
-            correct = 0
-            total = 0
-            with torch.no_grad():
-                for X_val_batch, y_val_batch in val_loader:
-                    X_val_batch, y_val_batch = X_val_batch.to(self.config.DEVICE), y_val_batch.to(self.config.DEVICE)
-                    val_outputs = model(X_val_batch)
-                    _, predicted = torch.max(val_outputs, 1)
-                    total += y_val_batch.size(0)
-                    correct += (predicted == y_val_batch).sum().item()
-
-            best_val_acc = correct / total
-            results[model_name] = {'val_accuracy': best_val_acc, 'best_val_loss': best_val_loss}
-            print(f"\n✓ {model_name.upper()} 训练完成! 最佳验证准确率: {best_val_acc:.4f}")
-
-        results_df = pd.DataFrame(results).T
-        results_path = self.config.RESULTS_DIR / f"deep_results_{self.timestamp}.csv"
-        results_df.to_csv(results_path)
-        print(f"\n✓ 结果已保存: {results_path}")
-
-        return results
-
-    def evaluate_all_models(self):
-        """评估所有训练好的模型"""
-        print("\n" + "=" * 80)
-        print("步骤 5: 模型评估")
-        print("=" * 80)
-
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-        from sklearn.metrics import confusion_matrix, classification_report
-
-        results = {}
-
-        # -----------------------------------------------------------------
-        # 1. 加载并评估经典ML模型 (XGBoost, etc.)
-        # -----------------------------------------------------------------
-
-        features_test = pd.read_pickle(self.config.FEATURES_DIR / "features_test.pkl")
-        X_test_ml = features_test['features'].values
-        y_test_ml = features_test['labels'].values
-
-        print(f"经典ML测试集: {X_test_ml.shape}")
-        print(f"标签分布 (ML): {np.bincount(y_test_ml.astype(int))}")
-
-        # (修复) 使用 self.timestamp 精确查找本次运行保存的 .pkl 文件
-        for model_file in self.config.CHECKPOINTS_DIR.glob(f"*_{self.timestamp}.pkl"):
-            # (修复) 把 try...except 移到循环内部
             try:
-                model_name = model_file.stem.replace(f"_{self.timestamp}", "")
-                print(f"\n评估 {model_name.upper()} (Classic)...")
+                # 1. 创建专用的训练器实例
+                # 注意：你可能需要确保 DeepModelTrainer 的 logger
+                # 和 pipeline 的 logger 不会冲突，或者让它使用 pipeline 的 logger
+                trainer = DeepModelTrainer(
+                    model_type=model_name,
+                    config=self.config,
+                    timestamp=self.timestamp  # 传递总时间戳
+                )
 
-                model = create_classical_model(model_name, self.config)
-                model.load(model_file)
-                y_pred_ml = model.predict(X_test_ml)
+                # 2. 运行完整的训练和评估流程
+                # （run() 方法会处理加载数据、训练、验证、早停、测试）
+                metrics = trainer.run()
 
-                results[model_name] = {
-                    'accuracy': accuracy_score(y_test_ml, y_pred_ml),
-                    'precision': precision_score(y_test_ml, y_pred_ml),
-                    'recall': recall_score(y_test_ml, y_pred_ml),
-                    'f1_score': f1_score(y_test_ml, y_pred_ml)
-                }
+                if metrics:
+                    self.all_model_metrics[model_name] = metrics
 
-                print(f"准确率: {results[model_name]['accuracy']:.4f}")
-                print(f"F1分数: {results[model_name]['f1_score']:.4f}")
-                print("\n分类报告:")
-                print(classification_report(y_test_ml, y_pred_ml,
-                                            target_names=['Normal', 'Anomaly']))
+                # 3. (可选) 从训练器获取结果
+                # 你可能需要修改 DeepModelTrainer.run()
+                # 让它返回一个 metrics 字典
+                # results[model_name] = trainer.get_best_metrics()
+
+                self.logger.info(f"--- {model_name.upper()} 训练完成 ---")
+
             except Exception as e:
-                print(f"!! 评估 {model_file.name} 失败: {e}")  # 打印失败信息并继续
-
-        # -----------------------------------------------------------------
-        # 2. 加载并评估深度学习模型 (LSTM_CNN, etc.)
-        # -----------------------------------------------------------------
-        try:
-            seq_test = pd.read_pickle(self.config.FEATURES_DIR / "sequences_test.pkl")
-            X_test_dl = torch.FloatTensor(seq_test['X_seq']).to(self.config.DEVICE)
-            y_test_dl_numpy = seq_test['y_seq']  # 用于评估的Numpy标签
-
-            print(f"\n深度学习测试集: {X_test_dl.shape}")
-
-            # (修复) 使用 self.timestamp 精确查找本次运行保存的 .pth 文件
-            for model_file in self.config.CHECKPOINTS_DIR.glob(f"*_best_{self.timestamp}.pth"):
-                # 从 "lstm_cnn_best_..." 中提取 "lstm_cnn"
-                model_name = model_file.stem.split('_best_')[0]
-                print(f"\n评估 {model_name.upper()} (Deep)...")
-
-                model = create_model(model_name, self.config)
-                model.load_state_dict(torch.load(model_file, map_location=self.config.DEVICE))
-                model.eval()
-
-                with torch.no_grad():
-                    outputs = model(X_test_dl)
-                    _, predicted = torch.max(outputs, 1)
-                    y_pred_dl = predicted.cpu().numpy()
-
-                # 使用Numpy标签进行评估
-                results[model_name] = {
-                    'accuracy': accuracy_score(y_test_dl_numpy, y_pred_dl),
-                    'precision': precision_score(y_test_dl_numpy, y_pred_dl),
-                    'recall': recall_score(y_test_dl_numpy, y_pred_dl),
-                    'f1_score': f1_score(y_test_dl_numpy, y_pred_dl)
-                }
-
-                print(f"准确率: {results[model_name]['accuracy']:.4f}")
-                print(f"F1分数: {results[model_name]['f1_score']:.4f}")
-                print("\n分类报告:")
-                print(classification_report(y_test_dl_numpy, y_pred_dl,
-                                            target_names=['Normal', 'Anomaly']))
-        except Exception as e:
-            print(f"评估深度学习模型失败: {e}")
-
-        # -----------------------------------------------------------------
-        # 3. 汇总所有结果
-        # -----------------------------------------------------------------
-        if results:
-            results_df = pd.DataFrame(results).T
-            results_path = self.config.RESULTS_DIR / f"evaluation_results_{self.timestamp}.csv"
-            results_df.to_csv(results_path)
-            print(f"\n✓ 评估结果已保存: {results_path}")
-
-            # 打印对比表
-            print("\n" + "=" * 80)
-            print("模型性能对比")
-            print("=" * 80)
-            print(results_df.round(4))
-        else:
-            print("没有找到模型进行评估。")
+                self.logger.error(f"训练 {model_name} 失败: {e}")
 
         return results
 
+
+    def compare_all_models(self):
+        """
+        步骤 5: 汇总所有模型结果,并生成对比图表
+        (不再重新加载和评估,只使用训练时保存的指标)
+        """
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info("步骤 5: 汇总模型对比")
+        self.logger.info("=" * 80)
+
+        if not self.all_model_metrics:
+            self.logger.warning("没有可对比的模型指标。请先运行 'train' 模式。")  # <--- 错误在这里
+            return
+
+        # 创建一个评估器实例, 仅用于对比
+        evaluator = ModelEvaluator()
+
+        # [关键] 直接将收集到的指标赋给评估器
+        evaluator.results = self.all_model_metrics
+
+        # 定义保存路径
+        compare_path = self.config.RESULTS_DIR / f"comparison_summary_{self.timestamp}.png"
+        csv_path = self.config.RESULTS_DIR / f"comparison_summary_{self.timestamp}.csv"
+
+        # 生成对比图 (雷达图和柱状图)
+        comparison_df = evaluator.compare_models(save_path=compare_path)
+
+        if comparison_df is not None:
+            # 保存对比的CSV
+            comparison_df.to_csv(csv_path, index=False)
+            self.logger.info(f"✓ 完整对比表格已保存: {csv_path}")
+
+            # ⬇⬇⬇ [新功能：追加到主成绩单] ⬇⬇⬇
+            try:
+                master_log_path = self.config.RESULTS_DIR / "master_results.csv"
+
+                # 1. 准备要追加的数据
+                # (我们不存 comparison_df, 我们存原始的 metrics 字典更灵活)
+                # (把 {'xgboost': {'f1': 0.9}, 'lstm': {'f1': 0.8}} 转换)
+
+                # '压扁' 字典, 变成一行
+                log_data = pd.DataFrame(self.all_model_metrics).T
+                log_data = log_data.stack().to_frame().T
+
+                # 设置索引为时间戳
+                log_data.index = [self.timestamp]
+
+                # 重新组织列名 (例如: ('xgboost', 'f1_score') -> 'xgboost_f1_score')
+                log_data.columns = ['_'.join(col) for col in log_data.columns.values]
+
+                if not master_log_path.exists():
+                    # 如果文件不存在，创建新文件并写入表头
+                    log_data.to_csv(master_log_path, index=True, index_label='timestamp', mode='w', header=True)
+                    self.logger.info(f"✓ 已创建主成绩单: {master_log_path}")
+                else:
+                    # 如果文件已存在，追加数据 (不写表头)
+                    log_data.to_csv(master_log_path, index=True, mode='a', header=False)
+                    self.logger.info(f"✓ 已追加到主成绩单: {master_log_path}")
+            except Exception as e:
+                self.logger.error(f"追加到主成绩单失败: {e}")
+            # ⬆⬆⬆ [新功能结束] ⬆⬆⬆
+
+        self.logger.info("\n✓ 模型对比完成!")
+        return comparison_df
 
 def main():
     """主函数"""
@@ -443,6 +312,8 @@ def main():
             pipeline.train_classical_models(['svm', 'random_forest', 'xgboost', 'gmm'])
             # 训练深度学习模型
             pipeline.train_deep_models(['lstm_cnn', 'cnn_1d'])
+            # [新增] 训练后立即进行对比
+            pipeline.compare_all_models()
         elif args.model in ['svm', 'random_forest', 'xgboost', 'gmm']:
             pipeline.train_classical_models([args.model])
         elif args.model in ['lstm_cnn', 'lstm_ae', 'cnn_1d']:
@@ -450,8 +321,14 @@ def main():
         else:
             print(f"未知模型: {args.model}")
 
+
     elif args.mode == 'eval':
-        pipeline.evaluate_all_models()
+        # [修改] 'eval' 模式现在只负责对比
+        # 注意: 这只会对比在 *同一次运行* 中已训练的模型
+        # (如果想加载历史结果进行对比, 逻辑会更复杂)
+        pipeline.logger.info("'eval' 模式现在执行 'compare_all_models'...")
+        pipeline.logger.info("注意: 这只会对比在本次运行中刚刚训练过的模型。")
+        pipeline.compare_all_models()
 
     elif args.mode == 'all':
         # 完整流程
@@ -459,7 +336,7 @@ def main():
         pipeline.run_feature_extraction()
         pipeline.train_classical_models(['svm', 'random_forest', 'xgboost', 'gmm'])
         pipeline.train_deep_models(['lstm_cnn'])
-        pipeline.evaluate_all_models()
+        pipeline.compare_all_models()
 
     print("\n" + "=" * 80)
     print("✓ 任务完成!")
