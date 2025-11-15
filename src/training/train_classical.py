@@ -151,7 +151,7 @@ class ClassicalModelTrainer:
 
         # 预测概率
         y_pred_proba = None
-        if hasattr(self.model.model, 'predict_proba'):
+        if hasattr(self.model, 'predict_proba'):
             y_pred_proba = self.model.predict_proba(X_test)
 
         # 评估

@@ -113,7 +113,11 @@ class Config:
 
     # ==================== 深度学习配置 ====================
     # 通用训练配置
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    DEVICE = torch.device(
+        'cuda' if torch.cuda.is_available() else
+        'mps' if torch.backends.mps.is_available() else
+        'cpu'
+    )
     BATCH_SIZE = 32
     NUM_EPOCHS = 100
     LEARNING_RATE = 0.001

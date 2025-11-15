@@ -80,7 +80,7 @@ class DeepModelTrainer:
                 mode='min',
                 factor=self.config.LR_FACTOR,
                 patience=self.config.LR_PATIENCE,
-                verbose=True
+                #verbose=True
             )
 
         # 记录超参数
@@ -357,7 +357,7 @@ class DeepModelTrainer:
             self.train(train_loader, val_loader)
 
             # 测试集评估
-            self.evaluate_on_test(test_loader)
+            metrics = self.evaluate_on_test(test_loader)
 
         finally:
             # 关闭logger

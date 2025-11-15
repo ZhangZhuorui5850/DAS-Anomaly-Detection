@@ -206,6 +206,9 @@ class TrainingLogger:
         self.logger.info("-" * 60)
 
         for key, value in metrics_dict.items():
+            if key == 'confusion_matrix':
+                continue
+
             self.logger.info(f"{key}: {value:.4f}")
 
             # TensorBoard记录

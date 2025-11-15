@@ -147,7 +147,7 @@ class ModelEvaluator:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"混淆矩阵已保存: {save_path}")
 
-        plt.show()
+        plt.close()
 
     def plot_roc_curve(self, y_true: np.ndarray, y_pred_proba: np.ndarray,
                        model_name: str = "Model",
@@ -180,7 +180,7 @@ class ModelEvaluator:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"ROC曲线已保存: {save_path}")
 
-        plt.show()
+        plt.close()
 
     def plot_precision_recall_curve(self, y_true: np.ndarray,
                                     y_pred_proba: np.ndarray,
@@ -212,7 +212,7 @@ class ModelEvaluator:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"PR曲线已保存: {save_path}")
 
-        plt.show()
+        plt.close()
 
     def compare_models(self, save_path: Optional[str] = None):
         """
@@ -290,7 +290,7 @@ class ModelEvaluator:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"\n对比图已保存: {save_path}")
 
-        plt.show()
+        plt.close()
 
         return df
 
