@@ -14,8 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 import numpy as np
 from typing import Tuple, Optional
-from sklearn.utils.class_weight import compute_class_weight # [!! 修复 !!] 导入
-from sklearn.metrics import precision_recall_fscore_support, f1_score, confusion_matrix # [!! 新增 !!]
+from sklearn.utils.class_weight import compute_class_weight
 
 from src.utils.config import Config
 from src.utils.logger import TrainingLogger

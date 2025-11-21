@@ -89,113 +89,7 @@ class LSTM_CNN(nn.Module):
 
 
 # ==========================================
-# 2. LSTM Autoencoder (异常检测)
-# ==========================================
-class LSTM_Autoencoder(nn.Module):
-    """基于重构误差的 LSTM 自编码器"""
-
-    def __init__(self, config):
-        super(LSTM_Autoencoder, self).__init__()
-        self.config = config
-        lstm_ae_cfg = config.LSTM_AE_CONFIG
-
-        if not hasattr(config, 'INPUT_FEATURES'):
-            raise ValueError("Config 中缺少 INPUT_FEATURES 属性!")
-
-        # 编码器
-        self.encoder_layers = nn.ModuleList()
-        input_size = config.INPUT_FEATURES
-        for hidden_size in lstm_ae_cfg['encoder_hidden_sizes']:
-            self.encoder_layers.append(nn.LSTM(input_size, hidden_size, batch_first=True))
-            input_size = hidden_size
-
-        # 解码器
-        self.decoder_layers = nn.ModuleList()
-        for hidden_size in lstm_ae_cfg['decoder_hidden_sizes']:
-            self.decoder_layers.append(nn.LSTM(input_size, hidden_size, batch_first=True))
-            input_size = hidden_size
-
-        self.output_layer = None  # 动态创建
-        self.dropout = nn.Dropout(lstm_ae_cfg['dropout'])
-
-    def forward(self, x):
-        batch_size, seq_len, features = x.shape
-
-        # 编码
-        encoded = x
-        for encoder in self.encoder_layers:
-            encoded, _ = encoder(encoded)
-            encoded = self.dropout(encoded)
-
-        # 解码
-        decoded = encoded
-        for decoder in self.decoder_layers:
-            decoded, _ = decoder(decoded)
-            decoded = self.dropout(decoded)
-
-        # 重构层
-        if self.output_layer is None:
-            self.output_layer = nn.Linear(decoded.shape[-1], features).to(x.device)
-
-        return self.output_layer(decoded)
-
-    def get_reconstruction_error(self, x):
-        reconstructed = self.forward(x)
-        return torch.mean((x - reconstructed) ** 2, dim=(1, 2))
-
-
-# ==========================================
-# 3. 1D-CNN 模型
-# ==========================================
-class CNN_1D(nn.Module):
-    """用于空间模式识别的纯 1D-CNN"""
-
-    def __init__(self, config):
-        super(CNN_1D, self).__init__()
-        cnn_cfg = config.CNN_1D_CONFIG
-
-        self.conv_blocks = nn.ModuleList()
-        in_channels = 1
-        for out_channels, kernel_size, pool_size in zip(cnn_cfg['conv_channels'], cnn_cfg['kernel_sizes'],
-                                                        cnn_cfg['pool_sizes']):
-            self.conv_blocks.append(nn.Sequential(
-                nn.Conv1d(in_channels, out_channels, kernel_size, padding=kernel_size // 2),
-                nn.BatchNorm1d(out_channels),
-                nn.ReLU(),
-                nn.MaxPool1d(pool_size),
-                nn.Dropout(cnn_cfg['dropout'])
-            ))
-            in_channels = out_channels
-
-        self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
-
-        self.fc_layers = nn.ModuleList()
-        fc_input_size = cnn_cfg['conv_channels'][-1]
-        for fc_hidden in cnn_cfg['fc_hidden_sizes']:
-            self.fc_layers.append(nn.Linear(fc_input_size, fc_hidden))
-            fc_input_size = fc_hidden
-
-        self.fc_out = nn.Linear(fc_input_size, cnn_cfg['num_classes'])
-        self.dropout = nn.Dropout(cnn_cfg['dropout'])
-
-    def forward(self, x):
-        if len(x.shape) == 2:
-            x = x.unsqueeze(2)  # (batch, features, 1)
-        x = x.permute(0, 2, 1)  # (batch, 1, features)
-
-        for block in self.conv_blocks:
-            x = block(x)
-
-        x = self.global_avg_pool(x).squeeze(-1)
-
-        for fc in self.fc_layers:
-            x = self.dropout(F.relu(fc(x)))
-
-        return self.fc_out(x)
-
-
-# ==========================================
-# 4. 2D-CNN 时空模型 (原 cnn_2d.py)
+# 2. 2D-CNN 时空模型 (原 cnn_2d.py)
 # ==========================================
 class CNN_2D_SpatioTemporal(nn.Module):
     """处理 (Freq/Space, Time) 二维图的 CNN"""
@@ -262,8 +156,6 @@ def create_model(model_type: str, config):
     """统一的模型创建入口"""
     model_dict = {
         'lstm_cnn': LSTM_CNN,
-        'lstm_ae': LSTM_Autoencoder,
-        'cnn_1d': CNN_1D,
         'cnn_2d': CNN_2D_SpatioTemporal
     }
 

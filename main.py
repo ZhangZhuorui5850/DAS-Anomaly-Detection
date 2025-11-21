@@ -265,7 +265,7 @@ def main():
                         choices=['preprocess', 'extract', 'train', 'eval', 'all'],
                         help='运行模式')
     parser.add_argument('--model', type=str, default='all',
-                        help='模型类型 (svm/rf/xgboost/gmm/lstm_cnn/lstm_ae/cnn_1d/all)')
+                        help='模型类型 (svm/rf/xgboost/gmm/lstm_cnn/all)')
     parser.add_argument('--config', type=str, default=None,
                         help='配置文件路径(可选)')
 
@@ -285,7 +285,7 @@ def main():
     elif args.mode == 'train':
         if args.model == 'all':
             pipeline.train_classical_models(['svm', 'random_forest', 'xgboost', 'gmm'])
-            pipeline.train_deep_models(['lstm_cnn', 'cnn_1d', 'cnn_2d'])
+            pipeline.train_deep_models(['lstm_cnn', 'cnn_2d'])
             pipeline.compare_all_models()
         elif args.model in ['svm', 'random_forest', 'xgboost', 'gmm']:
             pipeline.train_classical_models([args.model])

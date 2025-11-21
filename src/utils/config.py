@@ -178,26 +178,6 @@ class Config:
         'num_classes': 2
     }
 
-    # LSTM AE
-    LSTM_AE_CONFIG = {
-        'learning_rate': 0.001,
-        'encoder_hidden_sizes': [64, 32],
-        'decoder_hidden_sizes': [32, 64],
-        'latent_dim': 16,
-        'dropout': 0.3
-    }
-
-    # 1D-CNN配置
-    CNN_1D_CONFIG = {
-        'learning_rate': 0.001,
-        'conv_channels': [128, 128, 64],
-        'kernel_sizes': [5, 3, 3],
-        'pool_sizes': [2, 2, 2],
-        'fc_hidden_sizes': [256, 64],
-        'dropout': 0.5,
-        'num_classes': 2
-    }
-
     # 2D-CNN配置
     CNN_2D_CONFIG = {
         'learning_rate': 0.00001,
