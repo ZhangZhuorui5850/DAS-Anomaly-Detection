@@ -1,17 +1,63 @@
-# Python 编译文件
+# ==========================
+# 1. 操作系统生成的垃圾文件 (MacOS & Windows)
+# ==========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==========================
+# 2. Python 编译与运行时文件
+# ==========================
+# 编译缓存 (必须忽略，否则Git仓库会很乱)
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
 
-# 数据集 (保护隐私，减小体积)
+# 虚拟环境 (永远不要上传环境包，别人应该用 requirements.txt 安装)
+venv/
+env/
+.venv/
+.env
+
+# ==========================
+# 3. IDE 编辑器配置 (个人设置不需要共享)
+# ==========================
+# PyCharm / IntelliJ
+.idea/
+# VS Code
+.vscode/
+# 临时交换文件
+*.swp
+*.swo
+
+# ==========================
+# 4. 项目特定：大数据与产出 (Protect Your Repo!)
+# ==========================
+# 数据目录：包含原始 csv 和处理后的 pkl，体积大且可能涉及隐私
 data/
-!data/.gitkeep  # 如果你想保留文件夹结构，可以留这个
+# 如果你想保留 data 文件夹结构但忽略里面的文件，可以取消下面两行的注释，并删除上面那行：
+# data/*
+# !data/.gitkeep
 
-# 运行产物
+# 模型权重：训练出来的 .pth/.pkl 文件通常几百MB，不要传
 checkpoints/
+*.pth
+*.pt
+*.ckpt
+
+# 日志与结果：这些是运行产物，不是代码
 logs/
 results/
+runs/  # TensorBoard 生成的文件夹
 
-# 系统文件
-.DS_Store
-.idea/
-.vscode/
+# 忽略根目录下可能随手放的临时数据文件
+*.csv
+*.xlsx
+*.log
+*.zip
+*.tar.gz
