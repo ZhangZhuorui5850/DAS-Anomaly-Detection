@@ -15,10 +15,10 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent))
 
 from src.utils.config import Config
-from src.data.preprocessing import DASDataLoader, DASPreprocessor, temporal_split_dataset
+from src.data_preprocess.preprocessing import DASDataLoader, DASPreprocessor, temporal_split_dataset
 from src.features.feature_extraction import FeatureExtractor, SequenceGenerator
 from src.models.classical.classical_models import create_classical_model
-from src.models.deep_learning.deepmodels import create_model
+from src.models.deep_learning.lstm_cnn import create_model
 from src.utils.logger import Logger, TrainingLogger
 from src.training.train_classical import ClassicalModelTrainer
 from src.training.train_deep import DeepModelTrainer
@@ -67,25 +67,34 @@ class DASAnomalyDetectionPipeline:
             self.config
         )
 
+        apply_denoising = getattr(self.config, 'APPLY_DENOISING', False)
+        apply_wpd_denoise = getattr(self.config, 'APPLY_WPD_DENOISE', True)  # 新增
+
         # 4. 处理训练集 (Fit=True)
-        self.logger.info(f"处理训练集 (Fit=True, Method={self.config.DENOISE_METHOD})...")
+        self.logger.info("处理训练集 (Fit=True)...")
         df_train_processed = self.preprocessor.preprocess_pipeline(
             df_train,
-            fit=True
+            fit=True,
+            apply_denoising=apply_denoising,
+            apply_wpd_denoise=apply_wpd_denoise  # [!! 新增 !!]
         )
 
         # 5. 处理验证集 (Fit=False)
         self.logger.info("处理验证集 (Fit=False)...")
         df_val_processed = self.preprocessor.preprocess_pipeline(
             df_val,
-            fit=False
+            fit=False,
+            apply_denoising=apply_denoising,
+            apply_wpd_denoise=apply_wpd_denoise  # [!! 新增 !!]
         )
 
         # 6. 处理测试集 (Fit=False)
         self.logger.info("处理测试集 (Fit=False)...")
         df_test_processed = self.preprocessor.preprocess_pipeline(
             df_test,
-            fit=False
+            fit=False,
+            apply_denoising=apply_denoising,
+            apply_wpd_denoise=apply_wpd_denoise  # [!! 新增 !!]
         )
 
         # 5. 保存处理后的数据 (分离 X 和 y)
@@ -265,7 +274,7 @@ def main():
                         choices=['preprocess', 'extract', 'train', 'eval', 'all'],
                         help='运行模式')
     parser.add_argument('--model', type=str, default='all',
-                        help='模型类型 (svm/rf/xgboost/gmm/lstm_cnn/all)')
+                        help='模型类型 (svm/rf/xgboost/gmm/lstm_cnn/lstm_ae/cnn_1d/all)')
     parser.add_argument('--config', type=str, default=None,
                         help='配置文件路径(可选)')
 
@@ -285,7 +294,7 @@ def main():
     elif args.mode == 'train':
         if args.model == 'all':
             pipeline.train_classical_models(['svm', 'random_forest', 'xgboost', 'gmm'])
-            pipeline.train_deep_models(['lstm_cnn', 'cnn_2d'])
+            pipeline.train_deep_models(['lstm_cnn', 'cnn_1d', 'cnn_2d'])
             pipeline.compare_all_models()
         elif args.model in ['svm', 'random_forest', 'xgboost', 'gmm']:
             pipeline.train_classical_models([args.model])

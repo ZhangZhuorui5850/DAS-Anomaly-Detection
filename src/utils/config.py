@@ -1,7 +1,7 @@
 """
 配置文件 - src/utils/config.py
 集中管理所有超参数和路径配置
-[!! 已统一去噪接口 !!]
+[!! 新增WPD配置 !!]
 """
 
 import os
@@ -51,36 +51,33 @@ class Config:
         'NA': -1  # 未标注(处理时删除)
     }
 
-    # ==================== 去噪与预处理策略 (统一接口) ====================
-    # [!! 修改 !!] 核心控制开关：选择去噪方法
-    # 选项: 'wpd' (小波包), 'spectral' (频谱减法), 'none' (不去噪)
-    DENOISE_METHOD = 'wpd'
+    # ==================== [!! 新增 !!] WPD配置 ====================
+    APPLY_WPD_DENOISE = True  # 是否启用WPD去噪(深度学习预处理用)
+    WPD_WAVELET = 'db4'        # 小波基函数 ('db4', 'sym5', 'coif3')
+    WPD_LEVEL = 4              # 分解层数(3层→8个子带, 4层→16个子带)
+    WPD_THRESHOLD_SCALE = 1.5  # 阈值缩放因子(调参用, 建议范围: 0.5-2.0)
+    WPD_THRESHOLD_METHOD = 'soft'  # 阈值方法 ('soft' or 'hard')
+    # 跑 CNN-2D 时用: coif3, L4, S2.0
 
-    # --- 方法 1: WPD 去噪参数 (仅当 DENOISE_METHOD='wpd' 时生效) ---
-    WPD_WAVELET = 'db4'        # 小波基 ('db4', 'sym5', 'coif3')
-    # 跑 CNN-2D 时建议用: coif3
-    WPD_LEVEL = 4              # 分解层数 (通常 4 层)
-    WPD_THRESHOLD_SCALE = 1.5  # 阈值力度 (越大去噪越强, 建议 0.5-2.0)
-    WPD_THRESHOLD_METHOD = 'soft'  # 'soft' (保留细节) or 'hard' (强去噪)
+    # WPD特征提取配置(经典ML用)
+    ENABLE_WPD_FEATURES = True  # 是否在特征提取中启用WPD特征
+    WPD_FEATURE_LEVEL = 3       # 特征提取的WPD分解层数
+    WPD_FEATURE_WAVELET = 'db4' # 特征提取的小波基
 
-    # --- 方法 2: 频谱减法参数 (仅当 DENOISE_METHOD='spectral' 时生效) ---
-    NOISE_PERCENTILE = 10      # 噪声能量百分位数
-
-    # --- 通用预处理参数 ---
-    NORMALIZATION_METHOD = 'zscore'  # 'zscore', 'minmax'
-    HIGH_FREQ_THRESHOLD = 100  # Hz
+    # ==================== 预处理配置 ====================
+    APPLY_DENOISING = False  # [!! 修改 !!] 频谱减法去噪(与WPD二选一)
+    NORMALIZATION_METHOD = 'zscore'
+    HIGH_FREQ_THRESHOLD = 100  # Hz, 高频阈值
     HIGH_FREQ_PERCENTILE = 0.8
 
     # 缺失值处理
-    INTERPOLATION_METHOD = 'linear'
-    MAX_MISSING_RATIO = 0.3
+    INTERPOLATION_METHOD = 'linear'  # 'linear', 'cubic', 'nearest'
+    MAX_MISSING_RATIO = 0.3  # 超过30%缺失的样本将被删除
 
-    # ==================== 特征提取配置 ====================
-    # 注意：WPD特征提取是独立的，即使预处理选了'none'，这里也可以开启
-    ENABLE_WPD_FEATURES = True  # 是否提取WPD能量/熵特征
-    WPD_FEATURE_LEVEL = 3       # 特征提取用的层数 (通常比去噪用的浅)
-    WPD_FEATURE_WAVELET = 'db4'
+    # 频谱减法去噪配置(如果使用APPLY_DENOISING=True)
+    NOISE_PERCENTILE = 10  # 噪声能量百分位数
 
+    # ==================== 特征工程配置 ====================
     # 时域特征
     TIME_FEATURES = [
         'energy', 'max_amplitude', 'std', 'zero_crossing_rate',
@@ -178,6 +175,26 @@ class Config:
         'num_classes': 2
     }
 
+    # LSTM AE
+    LSTM_AE_CONFIG = {
+        'learning_rate': 0.001,
+        'encoder_hidden_sizes': [64, 32],
+        'decoder_hidden_sizes': [32, 64],
+        'latent_dim': 16,
+        'dropout': 0.3
+    }
+
+    # 1D-CNN配置
+    CNN_1D_CONFIG = {
+        'learning_rate': 0.001,
+        'conv_channels': [128, 128, 64],
+        'kernel_sizes': [5, 3, 3],
+        'pool_sizes': [2, 2, 2],
+        'fc_hidden_sizes': [256, 64],
+        'dropout': 0.5,
+        'num_classes': 2
+    }
+
     # 2D-CNN配置
     CNN_2D_CONFIG = {
         'learning_rate': 0.00001,
@@ -249,7 +266,8 @@ class Config:
         sections = [
             ('路径配置', ['PROJECT_ROOT', 'DATA_DIR', 'CHECKPOINTS_DIR']),
             ('数据配置', ['RANDOM_SEED', 'TRAIN_RATIO', 'VAL_RATIO', 'TEST_RATIO']),
-            ('去噪与预处理', ['DENOISE_METHOD', 'WPD_WAVELET', 'NORMALIZATION_METHOD']),
+            ('WPD配置', ['APPLY_WPD_DENOISE', 'ENABLE_WPD_FEATURES', 'WPD_WAVELET', 'WPD_LEVEL']),
+            ('预处理配置', ['NORMALIZATION_METHOD', 'INTERPOLATION_METHOD']),
             ('深度学习配置', ['DEVICE', 'BATCH_SIZE', 'NUM_EPOCHS'])
         ]
 

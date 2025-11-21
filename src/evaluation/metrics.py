@@ -351,65 +351,6 @@ class CrossValidationEvaluator:
 
         return summary
 
-def find_optimal_threshold(y_true, y_probs, tdr_goal=0.8, far_goal=0.1):
-    """
-    自动搜索满足 TDR/FAR 目标的最佳分类阈值
-
-    Args:
-        y_true: 真实标签 (0/1)
-        y_probs: 预测概率 (N, 2) 或 (N,)
-        tdr_goal: 目标真实检测率 (默认 0.8)
-        far_goal: 目标误报率 (默认 0.1)
-
-    Returns:
-        best_threshold: 最佳阈值 float
-        search_results: 包含达标情况的字典
-    """
-    # 提取异常概率 (如果是二维数组，取第二列)
-    if len(y_probs.shape) > 1:
-        val_probs_anomaly = y_probs[:, 1]
-    else:
-        val_probs_anomaly = y_probs
-
-    thresholds = np.arange(0.01, 1.0, 0.01)
-    best_f1_at_goal = -1.0
-    best_threshold_at_goal = -1.0
-    best_f1_overall = -1.0
-    best_threshold_overall = 0.5
-
-    for th in thresholds:
-        preds = (val_probs_anomaly > th).astype(int)
-
-        # 快速计算混淆矩阵元素
-        # 注意：这里简化了原本复杂的 try-except 逻辑，利用 sklearn 的健壮性
-        tn, fp, fn, tp = confusion_matrix(y_true, preds, labels=[0, 1]).ravel()
-
-        # 避免除以零
-        tdr = tp / (tp + fn) if (tp + fn) > 0 else 0
-        far = fp / (fp + tn) if (fp + tn) > 0 else 0
-
-        # 计算 F1
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tdr
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-
-        # 策略 1: 优先满足 TDR/FAR 目标
-        if tdr >= tdr_goal and far <= far_goal:
-            if f1 > best_f1_at_goal:
-                best_f1_at_goal = f1
-                best_threshold_at_goal = th
-
-        # 策略 2: 全局最佳 F1 (作为回退)
-        if f1 > best_f1_overall:
-            best_f1_overall = f1
-            best_threshold_overall = th
-
-    # 决策逻辑
-    if best_threshold_at_goal != -1.0:
-        return best_threshold_at_goal, {"status": "goal_met", "f1": best_f1_at_goal}
-    else:
-        return best_threshold_overall, {"status": "fallback", "f1": best_f1_overall}
-
 
 # 使用示例
 if __name__ == "__main__":
