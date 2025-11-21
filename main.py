@@ -15,7 +15,7 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent))
 
 from src.utils.config import Config
-from src.data.preprocessing import DASDataLoader, DASPreprocessor, temporal_split_dataset
+from src.data_process.preprocessing import DASDataLoader, DASPreprocessor, temporal_split_dataset
 from src.features.feature_extraction import FeatureExtractor, SequenceGenerator
 from src.models.classical.classical_models import create_classical_model
 from src.models.deep_learning.deepmodels import create_model

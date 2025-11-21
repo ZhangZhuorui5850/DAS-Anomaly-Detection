@@ -43,7 +43,7 @@ pip install matplotlib seaborn tqdm pyyaml joblib
 ### 2. 数据准备
 ```bash
 # 将示例数据.csv放入data/raw/目录
-cp 示例数据.csv data/raw/
+cp 示例数据.csv data_process/raw/
 ```
 
 ### 3. 运行完整流程
@@ -121,9 +121,10 @@ checkpoints/
 ## 🎯 模块使用说明
 
 ### 单独使用数据预处理
+
 ```python
 from src.utils.config import Config
-from src.data.preprocessing import DASDataLoader, DASPreprocessor
+from src.data_process.preprocessing import DASDataLoader, DASPreprocessor
 
 # 加载数据
 loader = DASDataLoader(Config.RAW_DATA_DIR / "示例数据.csv")

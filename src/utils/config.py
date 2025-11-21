@@ -20,7 +20,7 @@ class Config:
 
     # ==================== 路径配置 ====================
     PROJECT_ROOT = Path(__file__).parent.parent.parent
-    DATA_DIR = PROJECT_ROOT / "data"
+    DATA_DIR = PROJECT_ROOT / "data_process"
     RAW_DATA_DIR = DATA_DIR / "raw"
     PROCESSED_DATA_DIR = DATA_DIR / "processed"
     FEATURES_DIR = DATA_DIR / "features"
