@@ -1,6 +1,7 @@
 """
 配置文件 - src/utils/config.py
 集中管理所有超参数和路径配置
+[!! 新增WPD配置 !!]
 """
 
 import os
@@ -8,6 +9,11 @@ from pathlib import Path
 import yaml
 import torch
 
+HPO_SEARCH_SPACE = {
+    'WPD_WAVELET': ['db4', 'sym5', 'coif3'],  # 尝试不同的小波基
+    'WPD_LEVEL': [3, 4, 5],                   # 尝试不同的分解层数
+    'WPD_THRESHOLD_SCALE': [0.8, 1.0, 1.5, 2.0] # 尝试不同的阈值缩放
+}
 
 class Config:
     """全局配置类"""
@@ -31,7 +37,7 @@ class Config:
     # ==================== 数据配置 ====================
     DATA_FILE = "DAS_data.csv"
     RANDOM_SEED = 42
-    INPUT_FEATURES = 101  # 空间测量点的数量 (来自 X_train.shape[2])
+    INPUT_FEATURES = 101  # 空间测量点的数量
 
     # 数据集划分比例
     TRAIN_RATIO = 0.6
@@ -45,15 +51,31 @@ class Config:
         'NA': -1  # 未标注(处理时删除)
     }
 
+    # ==================== [!! 新增 !!] WPD配置 ====================
+    APPLY_WPD_DENOISE = True  # 是否启用WPD去噪(深度学习预处理用)
+    WPD_WAVELET = 'db4'        # 小波基函数 ('db4', 'sym5', 'coif3')
+    WPD_LEVEL = 4              # 分解层数(3层→8个子带, 4层→16个子带)
+    WPD_THRESHOLD_SCALE = 1.5  # 阈值缩放因子(调参用, 建议范围: 0.5-2.0)
+    WPD_THRESHOLD_METHOD = 'soft'  # 阈值方法 ('soft' or 'hard')
+    # 跑 CNN-2D 时用: coif3, L4, S2.0
+
+    # WPD特征提取配置(经典ML用)
+    ENABLE_WPD_FEATURES = True  # 是否在特征提取中启用WPD特征
+    WPD_FEATURE_LEVEL = 3       # 特征提取的WPD分解层数
+    WPD_FEATURE_WAVELET = 'db4' # 特征提取的小波基
+
     # ==================== 预处理配置 ====================
-    # 归一化方法: 'zscore', 'minmax', 'high_freq_energy'
-    NORMALIZATION_METHOD = 'high_freq_energy'
+    APPLY_DENOISING = False  # [!! 修改 !!] 频谱减法去噪(与WPD二选一)
+    NORMALIZATION_METHOD = 'zscore'
     HIGH_FREQ_THRESHOLD = 100  # Hz, 高频阈值
-    HIGH_FREQ_PERCENTILE = 0.8  # 使用后20%作为高频
+    HIGH_FREQ_PERCENTILE = 0.8
 
     # 缺失值处理
     INTERPOLATION_METHOD = 'linear'  # 'linear', 'cubic', 'nearest'
     MAX_MISSING_RATIO = 0.3  # 超过30%缺失的样本将被删除
+
+    # 频谱减法去噪配置(如果使用APPLY_DENOISING=True)
+    NOISE_PERCENTILE = 10  # 噪声能量百分位数
 
     # ==================== 特征工程配置 ====================
     # 时域特征
@@ -63,8 +85,8 @@ class Config:
     ]
 
     # 频域特征
-    NUM_FREQ_BANDS = 8  # 频带数量
-    SAMPLE_RATE = 5000  # Hz, 采样率(根据实际情况调整)
+    NUM_FREQ_BANDS = 8
+    SAMPLE_RATE = 5000  # Hz
 
     # 空间特征
     SPATIAL_FEATURES = [
@@ -73,24 +95,33 @@ class Config:
     ]
 
     # ==================== 时间窗口配置 ====================
-    WINDOW_SIZE = 5  # 时间窗口大小(帧数)
-    WINDOW_STRIDE = 1  # 窗口滑动步长
+    WINDOW_SIZE = 20
+    WINDOW_STRIDE = 1
 
     # ==================== 经典ML配置 ====================
     # SVM
     SVM_CONFIG = {
-        'kernel': 'linear',
-        'C': 1,
-        'gamma': 'scale',
+        'C': 10,
+        'break_ties': False,
+        'cache_size': 200,
         'class_weight': 'balanced',
+        'coef0': 0.0,
+        'decision_function_shape': 'ovr',
+        'degree': 3,
+        'gamma': 'scale',
+        'kernel': 'linear',
+        'max_iter': -1,
         'probability': True,
-        'random_state': RANDOM_SEED
+        'random_state': 42,
+        'shrinking': True,
+        'tol': 0.001,
+        'verbose': False
     }
 
     # Random Forest
     RF_CONFIG = {
-        'n_estimators': 300,
-        'max_depth': 30,
+        'n_estimators': 478,
+        'max_depth': 6,
         'min_samples_split': 10,
         'min_samples_leaf': 4,
         'class_weight': 'balanced',
@@ -102,17 +133,16 @@ class Config:
     XGB_CONFIG = {
         'objective': 'binary:logistic',
         'eval_metric': 'logloss',
-        'max_depth': 6,
-        'learning_rate': 0.1,
-        'n_estimators': 200,
-        'subsample': 0.8,
+        'max_depth': 3,
+        'learning_rate': 0.15099,
+        'n_estimators': 184,
+        'subsample': 0.8036,
         'colsample_bytree': 0.8,
         'random_state': RANDOM_SEED,
         'n_jobs': -1
     }
 
     # ==================== 深度学习配置 ====================
-    # 通用训练配置
     DEVICE = torch.device(
         'cuda' if torch.cuda.is_available() else
         'mps' if torch.backends.mps.is_available() else
@@ -120,12 +150,13 @@ class Config:
     )
     BATCH_SIZE = 32
     NUM_EPOCHS = 100
-    LEARNING_RATE = 0.001
-    WEIGHT_DECAY = 1e-4
+    WEIGHT_DECAY = 1e-5
 
     # 早停
     EARLY_STOPPING_PATIENCE = 15
     EARLY_STOPPING_DELTA = 1e-4
+
+    DEFAULT_PENALTY_WEIGHT_1 = 15.0
 
     # 学习率调度
     LR_SCHEDULER = 'ReduceLROnPlateau'
@@ -134,17 +165,19 @@ class Config:
 
     # LSTM-CNN配置
     LSTM_CNN_CONFIG = {
+        'learning_rate': 0.000025753,
         'cnn_filters': [256, 128, 64],
         'cnn_kernel_sizes': [5, 3, 3],
-        'lstm_hidden_size': 64,
+        'lstm_hidden_size': 128,
         'lstm_num_layers': 1,
         'fc_hidden_sizes': [256, 64],
-        'dropout': 0.6,
+        'dropout': 0.52988,
         'num_classes': 2
     }
 
-    # LSTM Autoencoder配置
+    # LSTM AE
     LSTM_AE_CONFIG = {
+        'learning_rate': 0.001,
         'encoder_hidden_sizes': [64, 32],
         'decoder_hidden_sizes': [32, 64],
         'latent_dim': 16,
@@ -153,6 +186,7 @@ class Config:
 
     # 1D-CNN配置
     CNN_1D_CONFIG = {
+        'learning_rate': 0.001,
         'conv_channels': [128, 128, 64],
         'kernel_sizes': [5, 3, 3],
         'pool_sizes': [2, 2, 2],
@@ -161,20 +195,27 @@ class Config:
         'num_classes': 2
     }
 
-    # ==================== 评估配置 ====================
-    # 交叉验证
-    CV_FOLDS = 5
-    CV_STRATEGY = 'stratified'  # 'stratified', 'kfold', 'timeseries'
+    # 2D-CNN配置
+    CNN_2D_CONFIG = {
+        'learning_rate': 0.00001,
+        'conv_channels': [32, 64, 64],
+        'fc_hidden': [128],
+        'dropout': 0.5,
+        'num_classes': 2
+    }
 
-    # 评估指标
+    # ==================== 评估配置 ====================
+    CV_FOLDS = 5
+    CV_STRATEGY = 'stratified'
+
     METRICS = [
         'accuracy', 'precision', 'recall', 'f1_score',
         'roc_auc', 'confusion_matrix'
     ]
 
     # DAS特定指标
-    TDR_THRESHOLD = 0.8  # True Detection Rate目标
-    FAR_THRESHOLD = 0.1  # False Alarm Rate目标
+    TDR_THRESHOLD = 0.8
+    FAR_THRESHOLD = 0.1
 
     # ==================== 可视化配置 ====================
     FIG_SIZE = (12, 6)
@@ -182,7 +223,7 @@ class Config:
     PLOT_STYLE = 'seaborn-v0_8-darkgrid'
 
     # ==================== 日志配置 ====================
-    LOG_LEVEL = 'INFO'  # 'DEBUG', 'INFO', 'WARNING', 'ERROR'
+    LOG_LEVEL = 'INFO'
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
     @classmethod
@@ -225,8 +266,9 @@ class Config:
         sections = [
             ('路径配置', ['PROJECT_ROOT', 'DATA_DIR', 'CHECKPOINTS_DIR']),
             ('数据配置', ['RANDOM_SEED', 'TRAIN_RATIO', 'VAL_RATIO', 'TEST_RATIO']),
+            ('WPD配置', ['APPLY_WPD_DENOISE', 'ENABLE_WPD_FEATURES', 'WPD_WAVELET', 'WPD_LEVEL']),
             ('预处理配置', ['NORMALIZATION_METHOD', 'INTERPOLATION_METHOD']),
-            ('深度学习配置', ['DEVICE', 'BATCH_SIZE', 'NUM_EPOCHS', 'LEARNING_RATE'])
+            ('深度学习配置', ['DEVICE', 'BATCH_SIZE', 'NUM_EPOCHS'])
         ]
 
         for section_name, keys in sections:
@@ -240,13 +282,5 @@ class Config:
         print("=" * 60)
 
 
-# 使用示例
 if __name__ == "__main__":
-    # 打印配置
     Config.print_config()
-
-    # 保存配置
-    # Config.save_config(Config.PROJECT_ROOT / "config.yaml")
-
-    # 加载配置
-    # Config.load_config(Config.PROJECT_ROOT / "config.yaml")

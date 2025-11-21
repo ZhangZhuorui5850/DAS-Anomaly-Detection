@@ -6,6 +6,7 @@ LSTM-CNN混合模型 - src/models/deep_learning/lstm_cnn.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .cnn_2d import CNN_2D_SpatioTemporal  # <--- 添加这一行
 
 
 class LSTM_CNN(nn.Module):
@@ -295,7 +296,8 @@ def create_model(model_type: str, config):
     model_dict = {
         'lstm_cnn': LSTM_CNN,
         'lstm_ae': LSTM_Autoencoder,
-        'cnn_1d': CNN_1D
+        'cnn_1d': CNN_1D,
+        'cnn_2d': CNN_2D_SpatioTemporal
     }
 
     if model_type not in model_dict:
