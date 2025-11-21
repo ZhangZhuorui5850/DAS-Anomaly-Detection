@@ -273,22 +273,12 @@ class DASPreprocessor:
 
         return df
 
-    def preprocess_pipeline(self, df: pd.DataFrame,
-                           fit: bool = True,
-                           apply_denoising: bool = False,
-                           apply_wpd_denoise: bool = False) -> pd.DataFrame:  # [!! 新增参数 !!]
-        """
-        完整预处理流程
-
-        [!! 修改 !!] 新增WPD去噪选项
-        """
-        print("="*60)
-        print(f"开始数据预处理流程 (Fit={fit})")
-        if apply_wpd_denoise:
-            print(f"  → WPD去噪: 启用 (小波={self.wpd_wavelet}, 层数={self.wpd_level})")
-        elif apply_denoising:
-            print(f"  → 频谱减法去噪: 启用")
-        print("="*60)
+    def preprocess_pipeline(self, df: pd.DataFrame, fit: bool = True) -> pd.DataFrame:
+        """完整预处理流程 (由 config.DENOISE_METHOD 控制去噪策略)"""
+        method = self.config.DENOISE_METHOD
+        print("=" * 60)
+        print(f"开始数据预处理 (Fit={fit}, Method={method})")
+        print("=" * 60)
 
         # 1. 处理缺失值
         df = self.handle_missing_values(df)
@@ -297,32 +287,30 @@ class DASPreprocessor:
         if 'status' in df.columns:
             df = self.handle_labels(df)
 
-        # 3. [!! 新增 !!] WPD去噪(优先级高于频谱减法)
-        if apply_wpd_denoise:
-            print("\n应用WPD去噪...")
+        # 3. 去噪策略路由 (Strategy Pattern)
+        if method == 'wpd':
+            print(f"\n>>> 应用 WPD 去噪 (Level={self.config.WPD_LEVEL})...")
             from tqdm import tqdm
-
-            for idx in tqdm(df.index, desc="WPD去噪进度"):
-                signal = df.loc[idx, self.spatial_cols].values
-                denoised = self.wpd_denoise(signal)
+            # 使用 tqdm 显示进度
+            for idx in tqdm(df.index, desc="WPD Denoising"):
+                signal_data = df.loc[idx, self.spatial_cols].values
+                denoised = self.wpd_denoise(signal_data)
                 df.loc[idx, self.spatial_cols] = denoised
 
-            print("✓ WPD去噪完成")
-
-        # 4. 频谱减法去噪(可选,与WPD二选一)
-        elif apply_denoising:
+        elif method == 'spectral':
+            print(f"\n>>> 应用频谱减法去噪 (Percentile={self.config.NOISE_PERCENTILE})...")
             df = self.spectral_subtraction(df, fit=fit)
 
-        # 5. 归一化
-        df = self.normalize_signals(
-            df,
-            method=self.config.NORMALIZATION_METHOD,
-            fit=fit
-        )
+        elif method == 'none':
+            print("\n>>> 跳过去噪步骤")
+
+        else:
+            print(f"\n[警告] 未知的去噪方法 '{method}'，跳过去噪")
+
+        # 4. 归一化
+        df = self.normalize_signals(df, method=self.config.NORMALIZATION_METHOD, fit=fit)
 
         print("\n预处理完成!")
-        print("="*60)
-
         return df
 
     def save_scaler(self, filepath: str):

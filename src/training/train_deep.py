@@ -19,8 +19,8 @@ from sklearn.metrics import precision_recall_fscore_support, f1_score, confusion
 
 from src.utils.config import Config
 from src.utils.logger import TrainingLogger
-from src.models.deep_learning.lstm_cnn import create_model
-from src.evaluation.metrics import ModelEvaluator
+from src.models.deep_learning.deepmodels import create_model
+from src.evaluation.metrics import ModelEvaluator, find_optimal_threshold
 
 
 class DeepModelTrainer:
@@ -332,139 +332,56 @@ class DeepModelTrainer:
 
         return np.array(all_labels), np.array(all_probs)
 
+        # src/training/train_deep.py 中的 evaluate_on_test 方法
+
     def evaluate_on_test(self, test_loader: DataLoader, val_loader: DataLoader):
-        """
-        在测试集上评估。
-        [!! 已重写 !!] 增加在验证集上搜索最佳阈值的步骤。
-        """
+        """在测试集上评估 (使用验证集搜索阈值)"""
         self.logger.logger.info("\n在测试集上评估...")
         model_path = self.config.CHECKPOINTS_DIR / f"{self.model_type}_best_{self.timestamp}.pth"
 
         # 1. 加载最佳模型
-        if not model_path.exists():
-            self.logger.logger.warning(f"未找到最佳模型: {model_path}。评估将使用当前模型状态。")
-            epoch_num = 'N/A'
-        else:
+        if model_path.exists():
             checkpoint = torch.load(model_path)
             self.model.load_state_dict(checkpoint['model_state_dict'])
-            epoch_num = checkpoint.get('epoch', 'N/A')
-            self.logger.logger.info(f"已加载最佳模型 (Epoch {epoch_num})")
+            self.logger.logger.info(f"已加载最佳模型 (Epoch {checkpoint.get('epoch', 'N/A')})")
+        else:
+            self.logger.logger.warning("未找到最佳模型，使用当前模型状态。")
 
         if self.model_type == 'lstm_ae':
-            self.logger.logger.warning("AE 模型的评估逻辑尚未实现。")
             return None
 
-        # 2. [!! 关键 !!] 在验证集 (val_loader) 上搜索最佳阈值
+        # 2. 在验证集上搜索最佳阈值 (调用 metrics.py 的新函数)
         self.logger.logger.info("在验证集上搜索最佳阈值...")
         val_labels, val_probs = self._get_predictions(val_loader)
-        val_probs_anomaly = val_probs[:, 1]  # 只获取“异常”类的概率
 
-        # 2. [!! 关键 !!] 在验证集 (val_loader) 上搜索最佳阈值 (新TDR/FAR目标)
-        self.logger.logger.info("在验证集上搜索最佳阈值 (新TDR/FAR目标)...")
-        val_labels, val_probs = self._get_predictions(val_loader)
-        val_probs_anomaly = val_probs[:, 1]  # 只获取“异常”类的概率
+        best_threshold, search_res = find_optimal_threshold(
+            val_labels, val_probs,
+            tdr_goal=self.config.TDR_THRESHOLD,
+            far_goal=self.config.FAR_THRESHOLD
+        )
 
-        # 搜索参数
-        thresholds = np.arange(0.01, 1.0, 0.01)  # 阈值
-        best_f1_at_goal = -1.0  # 达标下的最佳F1
-        best_threshold_at_goal = -1.0  # 达标下的最佳阈值
-        best_f1_overall = -1.0  # 纯F1最高
-        best_threshold_overall = 0.5  # 纯F1最高的阈值 (用于回退)
-
-        # 业务目标
-        TDR_GOAL = self.config.TDR_THRESHOLD  # 0.8
-        FAR_GOAL = self.config.FAR_THRESHOLD  # 0.1
-
-        for th in thresholds:
-            preds = (val_probs_anomaly > th).astype(int)
-
-            # 计算 F1
-            f1 = f1_score(val_labels, preds, zero_division=0)
-
-            # 计算 TDR 和 FAR
-            cm = confusion_matrix(val_labels, preds)
-
-            # [!! 健壮性修复 !!]
-            # 处理cm.ravel()在某些极端阈值下 (例如预测全为0或全为1) 失败的问题
-            if cm.shape == (2, 2):
-                tn, fp, fn, tp = cm.ravel()
-            elif cm.shape == (1, 1):
-                if np.unique(val_labels)[0] == 0:  # 真实值全为0, 预测也全为0
-                    tn, fp, fn, tp = cm[0, 0], 0, 0, 0
-                else:  # 真实值全为1, 预测也全为1
-                    tn, fp, fn, tp = 0, 0, 0, cm[0, 0]
-            else:
-                # 预测全为0 或 预测全为1 (但标签是混合的)
-                if np.unique(preds).shape[0] == 1:
-                    if np.unique(preds)[0] == 0:  # 预测全为 0
-                        tn = np.sum(val_labels == 0)
-                        fn = np.sum(val_labels == 1)
-                        fp, tp = 0, 0
-                    else:  # 预测全为 1
-                        fp = np.sum(val_labels == 0)
-                        tp = np.sum(val_labels == 1)
-                        tn, fn = 0, 0
-                else:
-                    # 出现其他未预料的cm形状, 跳过此阈值
-                    continue
-
-            tdr = tp / (tp + fn) if (tp + fn) > 0 else 0
-            far = fp / (fp + tn) if (fp + tn) > 0 else 0
-
-            # --- [!! 关键的自动化逻辑 !!] ---
-            # 1. 首先，我们只寻找“达标”的阈值
-            if tdr >= TDR_GOAL and far <= FAR_GOAL:
-                # 2. 在所有“达标”的阈值中，选择 F1 最高的那个
-                if f1 > best_f1_at_goal:
-                    best_f1_at_goal = f1
-                    best_threshold_at_goal = th
-
-            # (同时，我们仍然记录 F1 最高的阈值，作为回退)
-            if f1 > best_f1_overall:
-                best_f1_overall = f1
-                best_threshold_overall = th
-
-        # --- 决定使用哪个阈值 ---
-        if best_threshold_at_goal != -1.0:
-            # 找到了完美的阈值！
-            best_threshold = best_threshold_at_goal
-            self.logger.logger.info(
-                f"✓ [自动化] 找到了满足 TDR(>={TDR_GOAL})/FAR(<={FAR_GOAL}) 目标的最佳阈值 (基于验证集): {best_threshold:.2f}")
+        if search_res['status'] == 'goal_met':
+            self.logger.logger.info(f"✓ [自动化] 找到达标阈值: {best_threshold:.2f} (F1: {search_res['f1']:.4f})")
         else:
-            # 没找到，回退到 F1 最高的那个
-            best_threshold = best_threshold_overall
-            self.logger.logger.warning(f"✗ [自动化] 未找到能同时满足 TDR/FAR 的阈值。")
-            self.logger.logger.warning(f"  回退到 F1 最高的阈值: {best_threshold:.2f} (TDR/FAR可能不达标)")
+            self.logger.logger.warning(f"✗ [自动化] 未达标，回退到最佳 F1 阈值: {best_threshold:.2f}")
 
-        self.logger.logger.info(f"✓ [自动化] 最佳阈值 (最终使用): {best_threshold:.2f}")
         self.logger.log_hyperparameters({'best_threshold': best_threshold})
 
-        # 3. [!! 关键 !!] 在测试集 (test_loader) 上使用最佳阈值进行评估
-        self.logger.logger.info(f"在测试集上使用阈值 {best_threshold:.2f} 进行最终评估...")
+        # 3. 在测试集上应用阈值
         test_labels, test_probs = self._get_predictions(test_loader)
-
-        # 使用新阈值生成最终预测
         test_preds = (test_probs[:, 1] > best_threshold).astype(int)
 
-        # 4. 计算和报告指标
+        # 4. 评估
         evaluator = ModelEvaluator()
-        metrics = evaluator.evaluate(
-            test_labels,
-            test_preds,  # 使用基于新阈值的预测
-            test_probs,  # 仍然传递原始概率用于 ROC-AUC
-            self.model_type
-        )
+        metrics = evaluator.evaluate(test_labels, test_preds, test_probs, self.model_type)
 
-        self.logger.logger.info(f"--- 测试集结果 (阈值 = {best_threshold:.2f}) ---")
+        self.logger.logger.info(f"--- 测试集最终结果 (Threshold={best_threshold:.2f}) ---")
         evaluator.print_metrics(metrics, self.model_type)
+
+        # 保存结果
         self.logger.log_metrics(metrics, prefix='test/')
-        self.logger.log_confusion_matrix(
-            metrics['confusion_matrix'],
-            ['Normal', 'Anomaly'],
-            epoch=epoch_num
-        )
-        results_path = self.config.RESULTS_DIR / f"{self.model_type}_test_results.csv"
-        evaluator.save_results(results_path)
+        evaluator.save_results(self.config.RESULTS_DIR / f"{self.model_type}_test_results.csv")
+
         return metrics
 
     def run(self):

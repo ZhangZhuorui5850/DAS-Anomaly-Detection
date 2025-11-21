@@ -18,7 +18,7 @@ from src.utils.config import Config
 from src.data.preprocessing import DASDataLoader, DASPreprocessor, temporal_split_dataset
 from src.features.feature_extraction import FeatureExtractor, SequenceGenerator
 from src.models.classical.classical_models import create_classical_model
-from src.models.deep_learning.lstm_cnn import create_model
+from src.models.deep_learning.deepmodels import create_model
 from src.utils.logger import Logger, TrainingLogger
 from src.training.train_classical import ClassicalModelTrainer
 from src.training.train_deep import DeepModelTrainer
@@ -67,34 +67,25 @@ class DASAnomalyDetectionPipeline:
             self.config
         )
 
-        apply_denoising = getattr(self.config, 'APPLY_DENOISING', False)
-        apply_wpd_denoise = getattr(self.config, 'APPLY_WPD_DENOISE', True)  # 新增
-
         # 4. 处理训练集 (Fit=True)
-        self.logger.info("处理训练集 (Fit=True)...")
+        self.logger.info(f"处理训练集 (Fit=True, Method={self.config.DENOISE_METHOD})...")
         df_train_processed = self.preprocessor.preprocess_pipeline(
             df_train,
-            fit=True,
-            apply_denoising=apply_denoising,
-            apply_wpd_denoise=apply_wpd_denoise  # [!! 新增 !!]
+            fit=True
         )
 
         # 5. 处理验证集 (Fit=False)
         self.logger.info("处理验证集 (Fit=False)...")
         df_val_processed = self.preprocessor.preprocess_pipeline(
             df_val,
-            fit=False,
-            apply_denoising=apply_denoising,
-            apply_wpd_denoise=apply_wpd_denoise  # [!! 新增 !!]
+            fit=False
         )
 
         # 6. 处理测试集 (Fit=False)
         self.logger.info("处理测试集 (Fit=False)...")
         df_test_processed = self.preprocessor.preprocess_pipeline(
             df_test,
-            fit=False,
-            apply_denoising=apply_denoising,
-            apply_wpd_denoise=apply_wpd_denoise  # [!! 新增 !!]
+            fit=False
         )
 
         # 5. 保存处理后的数据 (分离 X 和 y)
